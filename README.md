@@ -1,2 +1,2 @@
 # News-aggregator
-My first News aggregator using RRS feed 
+My first News aggregator from RRS feed using python and MySQL Database
