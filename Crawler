@@ -1,0 +1,223 @@
+import MySQLdb
+import sys
+from feedfinding import *
+import feedparser
+import re,cgi
+import time
+
+class crawler:
+        conn = None
+        cursor = None
+        def __init__(self):
+                pass
+        def ConnectDB(self, host, user, passwd, db):
+                try:
+                        self.conn = MySQLdb.connect (host=host, port=3306 , user=user, passwd=passwd, db=db)
+                        self.cursor = self.conn.cursor()
+                        return self.cursor
+
+                except Exception as e:
+                        print e
+                        sys.exit()
+
+        def CommitDB(self):
+                self.conn.commit()
+
+        def CloseDB(self):
+                self.cursor.close()
+                self.conn.close()
+                
+        def add_web(self, url):
+
+                cursor = self.ConnectDB('127.0.0.1', 'root', 'aniq', 'mydb')
+
+                #format of query to insert data in web.
+                insert_to_web = "INSERT INTO web (url) VALUES (%s)"
+
+                try:
+                        #Run query to insert data.
+                        cursor.execute(insert_to_web, (url))
+
+                
+
+                        #Find Rss/Xml links
+                        f = feedfinding()
+                        feed_list = f.collect_feeds(url)
+
+                        
+                        #Save each xml link in Table "XML_PAGE"
+                        for link in feed_list:
+                                
+                                #format of query to insert data in web.
+                                insert_to_xml = "INSERT INTO xml (url, BOOL_CHECK, idWeb) VALUES (%s, %s, (SELECT idWeb from web where url = %s))"
+                                cursor.execute(insert_to_xml, (link, 0, url))
+
+
+                        self.CommitDB()
+                        self.CloseDB()
+                
+                        print "Successfully Inserted!"
+
+                except Exception as e:
+                        print e
+                        self.CloseDB()
+
+        def delete_web(self,link):
+
+                try:
+                        cursor = self.ConnectDB('127.0.0.1', 'root', 'aniq', 'mydb')
+                
+                        #Delete xml
+                        delete_xml = "DELETE FROM XML WHERE idWeb = (SELECT idWeb FROM WEB WHERE URL = %s)"
+                        cursor.execute(delete_xml, (link))
+
+                        #Delete Web
+                        delete_web = "DELETE FROM WEB WHERE URL = %s"
+                        cursor.execute(delete_web,(link))
+
+                        #Save and Close
+                        self.CommitDB()
+                        self.CloseDB()
+
+                        print "Successfully Deleted!"
+                        
+                except Exception as e:
+                        print e
+                        self.CloseDB()
+
+
+        def parse_all(self):
+
+                try:
+                        cursor = self.ConnectDB('127.0.0.1', 'root', 'aniq', 'mydb')
+                        
+
+                        select = "SELECT url FROM xml"
+                        cursor.execute(select)
+                        rows = cursor.fetchall()
+                        self.CloseDB()
+                        
+                        for i in rows:
+                                self.parse_one(i)
+                                print "process sleeping for 10 sec."
+                                time.sleep(10)
+        
+
+                        
+                except Exception as e:
+                        print e
+                        self.CloseDB()
+                        
+                
+        def parse_one(self,get_link):
+
+                try:
+                        cursor = self.ConnectDB('127.0.0.1', 'root', 'aniq', 'mydb')
+
+                        d = feedparser.parse(get_link)
+
+                        Title = []
+                        Link = []
+                        pub = []
+                        cat = []
+                        img = []
+                        summ = []
+                        
+                        count = 0
+                        x = len(d.entries)
+
+                        i = 1
+                        while i < x:
+                                
+                                try:                                        
+                                        
+                                        select = "SELECT * FROM NEWS WHERE external_link = %s"
+                                        ch = cursor.execute(select,(d.entries[i].link))
+                                        
+                                        if ch == 0:
+                                                Link.append(d.entries[i].link)
+                                                count = count + 1
+                                        else:
+                                                break
+                                        i = i + 1
+                                except Exception as e:
+                                        print e
+                                        Link.append(None)
+                                pass
+
+                        i = 0     
+                        while i < count:
+                                try:
+                                        Title.append(d.entries[i].title)
+                                        
+                                except Exception as e:
+                                        print e
+                                        Title.append(None)
+                                        pass
+
+                                i = i + 1
+
+                        i = 0   
+                        while i < count:
+                                try:
+                                        x = d.entries[i].published[5:16]
+                                        pub.append(x)
+                                        
+                                except Exception as e:
+                                        print e
+                                        pub.append(None)
+                                        pass
+
+                                i = i + 1
+
+                        i = 0   
+                        while i < count:
+                                try:
+                                        cat.append(d.entries[i].category)
+                                        
+                                except Exception as e:
+                                        print e
+                                        cat.append(None)
+                                        pass
+
+                                i = i + 1
+
+                        i = 0   
+                        while i < count:
+                                try:
+                                        img.append(d.entries[i]["media_thumbnail"][0]["url"])
+                                        i = i + 1
+                                except Exception as e:
+                                        print e
+                                        img.append(None)
+                                        pass
+
+                                i = i + 1
+
+                        i = 0   
+                        while i < count:
+                                try:
+                                        tag_re = re.compile(r'(<!--.*?-->|<[^>]*>)')
+                                        no_tags = tag_re.sub('', d.entries[i].summary)
+                                        summary = cgi.escape(no_tags)
+                                        summ.append(summary)
+                                        i = i + 1
+                                except Exception as e:
+                                        print e
+                                        summ.append(None)
+                                        pass
+
+                                i = i + 1
+
+                        for a, b, c, d, e, f in zip(Title, pub, summ,Link, img, cat):                              
+                                
+                                insert_news = "INSERT INTO NEWS (id_xml, title, date_pub,content,external_link,image,category) VALUES ((SELECT idxml_page FROM XML WHERE URL = %s),%s,%s,%s,%s,%s,%s)"
+                                cursor.execute(insert_news, (get_link, a, b, c, d, e, f))
+                
+                        self.CommitDB()
+                        self.CloseDB()
+                        print "save"
+                        
+                except Exception as e:
+                        print e
+                        self.CloseDB()
